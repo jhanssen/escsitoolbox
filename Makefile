@@ -1,18 +1,16 @@
 CXXFLAGS=-w4 -e25 -zq -oabehikls -d0 -bt=dos -fo=.obj -mc
 
-dos_objects = tbdos.obj aspiintf.obj scsiintf.obj toolbox.obj scsishrd.obj
+dos_objects = dos/tbdos.obj dos/aspiintf.obj dos/scsiintf.obj shared/toolbox.obj shared/scsishrd.obj
 win_objects = tbwin.obj
 win_resources = tbwin.res
 dos_exe = scsitb.exe
 win_exe = scsitbw.exe
 
-.cpp: dos\;win\;shared\
-
-.cpp.obj: .AUTODEPEND
-	wcl -c -cc++ -q $(CXXFLAGS) $[*
+%.obj: %.cpp
+	wcl -c -cc++ -q $(CXXFLAGS) -fo=$@ $<
 
 $(dos_exe): $(dos_objects)
-	wcl -l=dos -q -lr -fe=$^. $(dos_objects)
+	wcl -l=dos -q -lr -fe=$@ $(dos_objects)
 
 $(win_exe) $(win_resources): $(win_objects) win\tbwin.rc $(dos_exe)
 	wcl -l=windows -q -lr -fe=$^. -"option stub=$(dos_exe)" $(win_objects)
