@@ -378,15 +378,17 @@ static int DoSetName(int argc, const char *argv[])
     } else if (matchCount == 1 || mod >= 0) {
         int newimage = matches[mod >= 0 ? mod : 0].index;
         printf("Set loaded image for device %s type %d (%s) to index %d\n", dev->name, dev->devtype, GetDeviceTypeName(dev->devtype), newimage);
-        free(matches[0].name);
         r = ToolboxSetImage(*dev, newimage);
         if (r == 1) printf("Set next image command sent successfully.\n");
     } else {
         printf("Multiple candidates for setname:\n");
         for (int n = 0; n < matchCount; ++n) {
             printf("  %d: %s (%d)\n", n, matches[n].name, matches[n].index);
-            free(matches[n].name);
         }
+    }
+
+    for (int n = 0; n < matchCount; ++n) {
+        free(matches[n].name);
     }
 
     free(argv1);
