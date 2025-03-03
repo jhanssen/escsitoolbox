@@ -223,6 +223,13 @@ struct SetNameMatch
     int index;
 };
 
+static void cleanupMatches(SetNameMatch* matches, int matchCount)
+{
+    for (int n = 0; n < matchCount; ++n) {
+        free(matches[n].name);
+    }
+}
+
 static size_t mystrnlen(const char *s, size_t maxlen) {
     size_t i;
     for (i = 0; i < maxlen; ++i) {
@@ -267,11 +274,11 @@ static bool IsSetNameMatch(const char* argv1, char* candidate)
 
 static int DoSetName(int argc, const char *argv[])
 {
-    int r = InitSCSI();
+    int rr = InitSCSI();
 
     (void)argc; // unused parameter
 
-    if (r) return r;
+    if (rr) return rr;
 
     const Device *dev = GetDeviceByName(argv[0]);
     if (!dev) {
@@ -319,9 +326,9 @@ static int DoSetName(int argc, const char *argv[])
     int matchCount = 0;
     int index = 0;
     while (!feof(f)) {
-        size_t r = fread(buf + off, 1, sizeof(buf) - off, f);
-        if (r > 0) {
-            size = off + r;
+        size_t rd = fread(buf + off, 1, sizeof(buf) - off, f);
+        if (rd > 0) {
+            size = off + rd;
             // find \n, check if line matches query
             int suboff = 0;
             for (;;) {
@@ -335,6 +342,7 @@ static int DoSetName(int argc, const char *argv[])
                     } else {
                         // this would be bad
                         fprintf(stderr, "No '\n' in the entire SCSITB_FILES file?");
+                        cleanupMatches(matches, matchCount);
                         fclose(f);
                         return 23;
                     }
@@ -361,39 +369,46 @@ static int DoSetName(int argc, const char *argv[])
                     ++index;
                 } else {
                     fprintf(stderr, "More than 10 matches");
+                    cleanupMatches(matches, matchCount);
                     fclose(f);
                     return 24;
                 }
             }
         } else {
             fprintf(stderr, "Unable to read from SCSITB_FILES %d %d", errno, off);
+            cleanupMatches(matches, matchCount);
             fclose(f);
             return 25;
         }
     }
+    fclose(f);
 
     if (matchCount == 0) {
         fprintf(stderr, "No matches");
+        cleanupMatches(matches, matchCount);
         return 26;
     } else if (matchCount == 1 || mod >= 0) {
+        if (mod >= matchCount) {
+            fprintf(stderr, "Modifier out of range %d vs a count of %d\n", mod, matchCount);
+            cleanupMatches(matches, matchCount);
+            return 27;
+        }
         int newimage = matches[mod >= 0 ? mod : 0].index;
         printf("Set loaded image for device %s type %d (%s) to index %d\n", dev->name, dev->devtype, GetDeviceTypeName(dev->devtype), newimage);
-        r = ToolboxSetImage(*dev, newimage);
-        if (r == 1) printf("Set next image command sent successfully.\n");
+        rr = ToolboxSetImage(*dev, newimage);
+        if (rr == 1) printf("Set next image command sent successfully.\n");
     } else {
         printf("Multiple candidates for setname:\n");
         for (int n = 0; n < matchCount; ++n) {
             printf("  %d: %s (%d)\n", n, matches[n].name, matches[n].index);
         }
+        rr = 1;
     }
-
-    for (int n = 0; n < matchCount; ++n) {
-        free(matches[n].name);
-    }
+    cleanupMatches(matches, matchCount);
 
     free(argv1);
 
-    return r != 0;
+    return rr == 1 ? 0 : rr;
 }
 
 static int DoListSharedDir(int argc, const char *argv[])
