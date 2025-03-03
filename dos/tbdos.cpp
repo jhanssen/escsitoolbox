@@ -340,8 +340,6 @@ static int DoSetName(int argc, const char *argv[])
                     }
                     break;
                 } else if (matchCount < 10) {
-                    ++index;
-
                     int subend = nl - buf;
                     int trim = 0;
                     while (subend - trim >= 0 && (buf[subend - trim] == '\n' || buf[subend - trim] == '\r')) {
@@ -359,6 +357,8 @@ static int DoSetName(int argc, const char *argv[])
                         free(candidate);
                     }
                     suboff = subend + 1;
+
+                    ++index;
                 } else {
                     fprintf(stderr, "More than 10 matches");
                     fclose(f);
