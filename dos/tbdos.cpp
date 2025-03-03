@@ -322,7 +322,7 @@ static int DoSetName(int argc, const char *argv[])
         fprintf(stderr, "Can't open SCSITB_FILES filename (%s)", fn);
         return 22;
     }
-    SetNameMatch matches[10];
+    SetNameMatch matches[20];
     int matchCount = 0;
     int index = 0;
     while (!feof(f)) {
@@ -347,7 +347,7 @@ static int DoSetName(int argc, const char *argv[])
                         return 23;
                     }
                     break;
-                } else if (matchCount < 10) {
+                } else if (matchCount < 20) {
                     int subend = nl - buf;
                     int trim = 0;
                     while (subend - trim >= 0 && (buf[subend - trim] == '\n' || buf[subend - trim] == '\r')) {
@@ -368,7 +368,7 @@ static int DoSetName(int argc, const char *argv[])
 
                     ++index;
                 } else {
-                    fprintf(stderr, "More than 10 matches");
+                    fprintf(stderr, "More than 20 matches");
                     cleanupMatches(matches, matchCount);
                     fclose(f);
                     return 24;
