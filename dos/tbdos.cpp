@@ -250,15 +250,15 @@ static char* mystrndup(const char* s, size_t n)
 static bool IsSetNameMatch(const char* argv1, char* candidate)
 {
     // Loop through each position in the main string
-    for (int i = 0; candidate[i] != '\0'; i++) {
+    for (int i = 0; candidate[i] != '\0'; ++i) {
         int j = 0;
         // Check for substring match starting at each position
         while (candidate[i + j] != '\0' && argv1[j] != '\0' &&
                tolower(candidate[i + j]) == tolower(argv1[j])) {
-            j++;
+            ++j;
         }
         // If the whole substring matched
-        if (candidate[j] == '\0') {
+        if (argv1[j] == '\0') {
             return true; // Found the substring
         }
     }
@@ -307,8 +307,9 @@ static int DoSetName(int argc, const char *argv[])
 
     // read file, look at lines
     // first line is index 1, second line is index 2, etc.
-    char buf[8192];
+    char buf[512];
     size_t off = 0;
+    size_t size = 0;
     FILE* f = fopen(fn, "r");
     if (f == NULL) {
         fprintf(stderr, "Can't open SCSITB_FILES filename (%s)", fn);
@@ -318,16 +319,19 @@ static int DoSetName(int argc, const char *argv[])
     int matchCount = 0;
     int index = 0;
     while (!feof(f)) {
-        if (fread(buf + off, sizeof(buf) - off, 1, f) > 0) {
+        size_t r = fread(buf + off, 1, sizeof(buf) - off, f);
+        if (r > 0) {
+            size = off + r;
             // find \n, check if line matches query
             int suboff = 0;
             for (;;) {
-                char* nl = reinterpret_cast<char*>(memchr(buf + suboff, sizeof(buf) - suboff, '\n'));
+                // printf("Looking for \\n %d %d\n", suboff, size - suboff);
+                char* nl = reinterpret_cast<char*>(memchr(buf + suboff, '\n', size - suboff));
                 if (nl == NULL) {
                     // memmove and break
                     if (suboff > 0) {
-                        memmove(buf, buf + suboff, sizeof(buf) - suboff);
-                        off = suboff;
+                        memmove(buf, buf + suboff, size - suboff);
+                        off = size = size - suboff;
                     } else {
                         // this would be bad
                         fprintf(stderr, "No '\n' in the entire SCSITB_FILES file?");
@@ -340,15 +344,18 @@ static int DoSetName(int argc, const char *argv[])
 
                     int subend = nl - buf;
                     int trim = 0;
-                    while (subend >= 0 && (buf[subend] == '\n' || buf[subend] == '\r')) {
+                    while (subend - trim >= 0 && (buf[subend - trim] == '\n' || buf[subend - trim] == '\r')) {
                         ++trim;
                     }
-                    char* candidate = mystrndup(buf + suboff, subend - suboff - trim);
-                    if ((mod == -1 || mod == index) && IsSetNameMatch(argv1, candidate)) {
+                    char* candidate = mystrndup(buf + suboff, subend - suboff - trim + 1);
+                    // printf("testing... %d '%s' '%s'\n", mod, argv1, candidate);
+                    if (IsSetNameMatch(argv1, candidate)) {
+                        // printf("found\n");
                         matches[matchCount].name = candidate;
                         matches[matchCount].index = index;
                         ++matchCount;
                     } else {
+                        // printf("no\n");
                         free(candidate);
                     }
                     suboff = subend + 1;
@@ -359,17 +366,17 @@ static int DoSetName(int argc, const char *argv[])
                 }
             }
         } else {
-            fprintf(stderr, "Unable to read from SCSITB_FILES %d", errno);
+            fprintf(stderr, "Unable to read from SCSITB_FILES %d %d", errno, off);
             fclose(f);
             return 25;
         }
     }
 
     if (matchCount == 0) {
-        printf("No matches");
+        fprintf(stderr, "No matches");
         return 26;
-    } else if (matchCount == 1) {
-        int newimage = matches[0].index;
+    } else if (matchCount == 1 || mod >= 0) {
+        int newimage = matches[mod >= 0 ? mod : 0].index;
         printf("Set loaded image for device %s type %d (%s) to index %d\n", dev->name, dev->devtype, GetDeviceTypeName(dev->devtype), newimage);
         free(matches[0].name);
         r = ToolboxSetImage(*dev, newimage);
