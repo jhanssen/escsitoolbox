@@ -24,7 +24,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <libgen.h> 
+#include <libgen.h>
+#include <ctype.h>
 #include <wcvector.h>
 
 #include "../include/aspi.h"
@@ -216,6 +217,175 @@ static int DoSetImage(int argc, const char *argv[])
     return r != 0;
 }
 
+struct SetNameMatch
+{
+    char* name;
+    int index;
+};
+
+static size_t mystrnlen(const char *s, size_t maxlen) {
+    size_t i;
+    for (i = 0; i < maxlen; ++i) {
+        if (s[i] == '\0') {
+            return i;
+        }
+    }
+    return maxlen;
+}
+
+static char* mystrndup(const char* s, size_t n)
+{
+    char *new_string;
+    size_t len = mystrnlen(s, n);
+
+    new_string = (char *)malloc(len + 1);
+    if (new_string == NULL) {
+        return NULL;
+    }
+    memcpy(new_string, s, len);
+    new_string[len] = '\0';
+    return new_string;
+}
+
+static bool IsSetNameMatch(const char* argv1, char* candidate)
+{
+    // Loop through each position in the main string
+    for (int i = 0; candidate[i] != '\0'; i++) {
+        int j = 0;
+        // Check for substring match starting at each position
+        while (candidate[i + j] != '\0' && argv1[j] != '\0' &&
+               tolower(candidate[i + j]) == tolower(argv1[j])) {
+            j++;
+        }
+        // If the whole substring matched
+        if (candidate[j] == '\0') {
+            return true; // Found the substring
+        }
+    }
+    return false;
+}
+
+static int DoSetName(int argc, const char *argv[])
+{
+    int r = InitSCSI();
+
+    (void)argc; // unused parameter
+
+    if (r) return r;
+
+    const Device *dev = GetDeviceByName(argv[0]);
+    if (!dev) {
+        fprintf(stderr, "Device ID not found: %s\n", argv[0]);
+        return 16;
+    }
+
+    const char* fn = getenv("SCSITB_FILES");
+    if (fn == NULL) {
+        fprintf(stderr, "SCSITB_FILES environment variable not set");
+        return 19;
+    }
+
+    char* argv1 = strdup(argv[1]);
+    // modifiers are [index], at the end
+    int mod = -1;
+    char* mods = strchr(argv1, '[');
+    if (mods != NULL) {
+        const char* mode = strchr(mods + 1, ']');
+        if (mode == NULL) {
+            fprintf(stderr, "Started a modifier but no end");
+            return 20;
+        }
+
+        if (sscanf(mods, "[%d]", &mod) != 1 || mod < 0 || mod > 100) {
+            fprintf(stderr, "Modifier bad or out of range");
+            return 21;
+        }
+
+        // remove the modifier
+        *mods = '\0';
+    }
+
+    // read file, look at lines
+    // first line is index 1, second line is index 2, etc.
+    char buf[8192];
+    size_t off = 0;
+    FILE* f = fopen(fn, "r");
+    if (f == NULL) {
+        fprintf(stderr, "Can't open SCSITB_FILES filename (%s)", fn);
+        return 22;
+    }
+    SetNameMatch matches[10];
+    int matchCount = 0;
+    int index = 0;
+    while (!feof(f)) {
+        if (fread(buf + off, sizeof(buf) - off, 1, f) > 0) {
+            // find \n, check if line matches query
+            int suboff = 0;
+            for (;;) {
+                char* nl = reinterpret_cast<char*>(memchr(buf + suboff, sizeof(buf) - suboff, '\n'));
+                if (nl == NULL) {
+                    // memmove and break
+                    if (suboff > 0) {
+                        memmove(buf, buf + suboff, sizeof(buf) - suboff);
+                        off = suboff;
+                    } else {
+                        // this would be bad
+                        fprintf(stderr, "No '\n' in the entire SCSITB_FILES file?");
+                        fclose(f);
+                        return 23;
+                    }
+                    break;
+                } else if (matchCount < 10) {
+                    ++index;
+
+                    int subend = nl - buf;
+                    int trim = 0;
+                    while (subend >= 0 && (buf[subend] == '\n' || buf[subend] == '\r')) {
+                        ++trim;
+                    }
+                    char* candidate = mystrndup(buf + suboff, subend - suboff - trim);
+                    if ((mod == -1 || mod == index) && IsSetNameMatch(argv1, candidate)) {
+                        matches[matchCount].name = candidate;
+                        matches[matchCount].index = index;
+                        ++matchCount;
+                    } else {
+                        free(candidate);
+                    }
+                    suboff = subend + 1;
+                } else {
+                    fprintf(stderr, "More than 10 matches");
+                    fclose(f);
+                    return 24;
+                }
+            }
+        } else {
+            fprintf(stderr, "Unable to read from SCSITB_FILES %d", errno);
+            fclose(f);
+            return 25;
+        }
+    }
+
+    if (matchCount == 0) {
+        printf("No matches");
+        return 26;
+    } else if (matchCount == 1) {
+        int newimage = matches[0].index;
+        printf("Set loaded image for device %s type %d (%s) to index %d\n", dev->name, dev->devtype, GetDeviceTypeName(dev->devtype), newimage);
+        free(matches[0].name);
+        r = ToolboxSetImage(*dev, newimage);
+        if (r == 1) printf("Set next image command sent successfully.\n");
+    } else {
+        printf("Multiple candidates for setname:\n");
+        for (int n = 0; n < matchCount; ++n) {
+            printf("  %d: %s (%d)\n", n, matches[n].name, matches[n].index);
+            free(matches[n].name);
+        }
+    }
+
+    free(argv1);
+
+    return r != 0;
+}
 
 static int DoListSharedDir(int argc, const char *argv[])
 {
@@ -513,6 +683,8 @@ static void PrintHelp(void)
         "  lsimg <dev>             List available images for the given device.\n"
         "  setimg <dev> <idx>      Change the mounted image in the given device, to\n"
         "                          the image with the given index in the image list.\n"
+        "  setname <dev> <name>    Change the mounted image in the given device, to\n"
+        "                          the image with the given name.\n"
         "  lsdir <dev>             List shared directory for the given decice.\n"
         "  get <dev> <idx> [name]  Download a file from the shared directory.\n"
         "  put <dev> <filename>    Upload a file to the shared directory.\n"
@@ -560,6 +732,14 @@ int main(int argc, const char *argv[])
     if (strcmpi(argv[1], "setimg") == 0) {
         if (argc >= 4) {
             return DoSetImage(argc - 2, argv + 2);
+        } else {
+            missingargs = 2;
+        }
+    }
+
+    if (strcmpi(argv[1], "setname") == 0) {
+        if (argc >= 4) {
+            return DoSetName(argc - 2, argv + 2);
         } else {
             missingargs = 2;
         }
