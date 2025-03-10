@@ -1,0 +1,18 @@
+CXXFLAGS=-w4 -3 -zq -zk0 -ox -fo=.obj -mc
+
+dos_objects = dos/tbdos.pc98.obj dos/aspiintf.pc98.obj dos/scsiintf.pc98.obj shared/toolbox.pc98.obj shared/scsishrd.pc98.obj
+dos_exe = scsitb98.exe
+
+%.pc98.obj: %.cpp
+	wcl -c -cc++ -q $(CXXFLAGS) -fo=$@ $<
+
+$(dos_exe): $(dos_objects)
+	wcl -l=dos -k8K -q -lr -fe=$@ $(dos_objects)
+
+clean:
+	rm -f dos/*.err
+	rm -f shared/*.err
+	rm -f $(dos_exe)
+	rm -f $(dos_objects)
+
+all: $(dos_exe)
